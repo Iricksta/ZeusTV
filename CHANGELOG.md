@@ -1,5 +1,23 @@
 # ZeusTV Changelog
 
+## [Fix] ProGuard Package Name Crash Fix — 2026-03-24
+
+**Crash:** App crashed every time a profile was selected after the v1.0.1 sync update.
+
+**Root cause:** `proguard-rules.pro` still referenced the old package name `com.nuvio.tv` in 7 keep rules after the fork rename to `com.zeus.tv`. R8 was freely obfuscating domain model, DTO, plugin, server, and Supabase classes. Each new APK build used a different R8 mapping, so the Gson manifest cache from a previous build contained field names that no longer matched → Gson returned `LinkedTreeMap` instead of `CatalogDescriptor` → `ClassCastException` crash in `LayoutSettingsViewModel`.
+
+**Fix:** Updated `app/proguard-rules.pro` — replaced all 7 `com.nuvio.tv` occurrences with `com.zeus.tv` to restore keep rules for:
+- `com.zeus.tv.data.remote.api.**`
+- `com.zeus.tv.data.remote.dto.**`
+- `com.zeus.tv.domain.model.**`
+- `com.zeus.tv.core.server.**`
+- `com.zeus.tv.core.plugin.**`
+- `com.zeus.tv.data.remote.supabase.**`
+
+**After installing the fixed APK:** Run `adb shell pm clear com.zeus.tv` once to clear the corrupted Gson manifest cache from the broken build.
+
+---
+
 ## [Feature] Device-Scoped Settings Sync (TV vs Phone) — 2026-03-23
 
 Settings sync now correctly separates TV and phone/tablet settings so they don't overwrite each other.
