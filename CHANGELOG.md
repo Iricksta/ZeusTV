@@ -1,5 +1,17 @@
 # ZeusTV Changelog
 
+## [Feature] Device-Scoped Settings Sync (TV vs Phone) — 2026-03-23
+
+Settings sync now correctly separates TV and phone/tablet settings so they don't overwrite each other.
+
+- **Layout settings** (sidebar, layout type, poster sizes) — syncs per device type. TV layout stays on TV, phone layout stays on phone.
+- **Player settings** (decoder, frame rate matching, tunneling) — syncs per device type.
+- **Universal settings** (theme, trakt, trailer, anime skip, track preferences) — still sync across all devices as before.
+
+How it works: each device tags its settings as `"tv"` or `"phone"` in Supabase. A TV only pulls TV + universal settings. A phone only pulls phone + universal settings.
+
+---
+
 ## [Feature] Full Cross-Device Sync — Watch Progress + All Settings — 2026-03-23
 
 ### Phase 1 — Continue Watching Periodic Refresh
