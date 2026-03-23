@@ -1,0 +1,6 @@
+# Ignore everything
+*
+
+# Except changelog and gitignore
+!CHANGELOG.md
+!.gitignore
