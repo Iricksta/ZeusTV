@@ -1,5 +1,88 @@
 # ZeusTV Changelog
 
+## [Fix] Subtitle "None" Not Enforced on New Content — 2026-03-24
+
+**Changes:**
+- **Subtitle disabled when preference is "none"** — `tryAutoSelectPreferredSubtitleFromAvailableTracks()` now calls `disableSubtitles()` before returning when the preferred language list is empty (preference = "none"). Previously the function returned without disabling tracks, leaving ExoPlayer's default auto-selector free to pick the first available track (English). This caused subtitles to re-appear on every new movie even though the user had turned them off.
+
+**Files changed:**
+- `ui/screens/player/PlayerRuntimeControllerTracks.kt` — added `disableSubtitles()` call in `targets.isEmpty()` branch
+
+---
+
+## [Improvement] Player Cleanup — 2026-03-24
+
+**Changes:**
+- **Player job cleanup** — `hideAspectRatioIndicatorJob` is now explicitly cancelled in `releasePlayer()`, consistent with all other player jobs. Previously relied solely on `viewModelScope` auto-cancellation.
+
+---
+
+## [Fix] Subtitle Sync + CW Instant Load — 2026-03-24
+
+**Changes:**
+- **CW instant load** — enrichment grace period set to 0ms. Images now appear immediately after app restart using 30-day disk cache. First-ever load still fetches from TMDB (~3-5s) but all subsequent restarts are instant.
+- **Subtitle default changed to "none"** — `preferredLanguage` now defaults to `"none"` for all new profiles. Subtitles are off unless the user explicitly enables them.
+- **Cross-device subtitle sync** — subtitle preference is now pushed to Supabase as a universal group (`subtitle_prefs`, `device_type = "all"`) whenever changed on TV. Mobile receives this on startup and profile switch.
+- **Startup subtitle pull** — `StartupSyncService` now applies the `subtitle_prefs` group (after `player` group) so the cross-device preference takes effect on every TV startup.
+
+**Files changed:**
+- `ui/screens/home/HomeViewModel.kt` — `CONTINUE_WATCHING_ENRICHMENT_GRACE_PERIOD_MS` = 0
+- `data/local/PlayerSettingsDataStore.kt` — subtitle default `"none"`, universal subtitle_prefs push in init
+- `core/sync/StartupSyncService.kt` — applies `subtitle_prefs` group on pull
+- `data/local/TmdbEnrichmentCacheDataStore.kt` — new 30-day persistent disk cache for TMDB enrichment
+
+---
+
+## [Fix] CW Card Missing Title + Instant Load After First View — 2026-03-24
+
+**Issues:**
+1. CW cards for mobile-played content showed no movie/show title (blank where title should be)
+2. Every time the app restarted, CW images/hero took 3-5 seconds to reload
+
+**Root causes:**
+1. Supabase only stores watch position (not content name). When TV pulled synced items, title was blank. The enrichment code already fetches metadata (for images) but was discarding the name field.
+2. `TmdbMetadataService` had an in-memory-only cache. Every cold start hit the TMDB API again for all CW items (4 parallel API calls per item).
+
+**Fix — 4 files:**
+- `HomeUiState.kt` — Added `title: String?` field to `ContinueWatchingItem.InProgress`
+- `HomeViewModelContinueWatching.kt` — `enrichInProgressItem()` now populates `title` from `meta.name` / `tmdbData.localizedTitle`
+- `ContinueWatchingSection.kt` — Card title now uses enriched title first, falling back to `progress.name`
+- `TmdbEnrichmentCacheDataStore.kt` *(new)* + `TmdbMetadataService.kt` — Added persistent DataStore cache (TTL 30 days) following the `StreamLinkCacheDataStore` pattern. Lookup order: memory → disk (~50ms) → TMDB API. First view = slow (API fetch, saved to disk). All subsequent restarts = instant (disk cache hit).
+
+---
+
+## [Fix] CW Card Blank for Mobile-Played Content + Hero Backdrop Slow — 2026-03-24
+
+**Issues:**
+1. CW card was black/blank for content watched on mobile or tablet (but showed correctly for TV-played content)
+2. Hero backdrop took 3–5 seconds to appear when focusing a CW item
+
+**Root causes:**
+1. `ContinueWatchingSection.kt` was reading image URLs from `progress.backdrop` / `progress.poster` which are always null for synced items. The enriched wrapper fields `item.backdrop` / `item.poster` (correctly populated by our TMDB enrichment) were being ignored entirely.
+2. `enrichVisibleContinueWatchingItems()` ran TMDB enrichment sequentially in a `forEach` loop — total wait time was the sum of all TMDB calls combined.
+
+**Fix — 2 files:**
+- `ContinueWatchingSection.kt` — Extract `enrichedBackdrop`/`enrichedPoster` from `InProgress` item wrapper. Update both `imageModel` branches to prioritise enriched fields over raw `progress.*` fields.
+- `HomeViewModelContinueWatching.kt` — Replace sequential `forEach` with `async`/`awaitAll` + `Semaphore(CW_MAX_NEXT_UP_CONCURRENCY)` so all enrichment requests run concurrently (capped at 2 concurrent TMDB calls). Total enrichment time drops from sum-of-all to max-of-any.
+
+---
+
+## [Fix] Continue Watching Backdrop Black for Synced Items — 2026-03-24
+
+**Issue:** CW cards for content watched on mobile showed text (title, description, IMDb, genre) but completely black backdrop/poster image on the TV home screen.
+
+**Root cause (three-layer collapse):**
+1. `WatchProgressSyncService.kt` — when pulling watch progress from Supabase, `poster`, `backdrop`, and `logo` are hardcoded to `null`. The Supabase `watch_progress` table stores only playback data, not images.
+2. `ContinueWatchingItem.InProgress` data class had no `backdrop`/`poster`/`logo` fields — there was nowhere to store enriched images.
+3. `enrichInProgressItem()` enriched text metadata (description, IMDb, genres) but never called TMDB to resolve images. `ModernHomeModels.kt` then read from `item.progress.backdrop` which was always `null`.
+
+**Fix (3 files):**
+- `HomeUiState.kt` — Added `backdrop`, `poster`, `logo` fields to `ContinueWatchingItem.InProgress`
+- `HomeViewModelContinueWatching.kt` — Updated `enrichInProgressItem()` to resolve TMDB data via `resolveTmdbIdForNextUp()` + `tmdbMetadataService.fetchEnrichment()`, populating images from: progress fields → addon meta → TMDB (in priority order)
+- `ModernHomeModels.kt` — Updated hero section and CW card to use enriched `item.backdrop`/`item.poster`/`item.logo` fields with fallback to raw progress fields
+
+---
+
 ## [Fix] ProGuard Package Name Crash Fix — 2026-03-24
 
 **Crash:** App crashed every time a profile was selected after the v1.0.1 sync update.
